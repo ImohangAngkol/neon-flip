@@ -1,14 +1,18 @@
-# Neon Flip
+# Neon Flip 1.2
 
-Neon Flip is a small, single-file arcade game built with Python and Tkinter. Dodge hazards, collect gems, build a combo, and survive as the pace gradually increases.
+Neon Flip is a small, single-file arcade game built with Python and Tkinter. Pick a mode, dodge hazards, collect gems, build combos, and survive as the pace gradually increases.
 
 ## Features
 
 - Two-lane movement with smooth lane changes
 - Neon-styled hazards, gems, particles, and score popups
-- Three lives, temporary damage protection, and forgiving collision bounds
+- Classic mode: three lives and a balanced difficulty curve
+- Rush mode: one life, faster hazards, and 1.5x scoring
+- Rare shield pickups absorb one collision; shields do not stack
 - Gem combos and Overdrive, which lets you smash hazards for bonus points
-- Pause and resume, plus persistent local high scores
+- Separate saved high scores for Classic and Rush
+- Optional, non-blocking Windows system sounds
+- Pause and resume, forgiving collision bounds, and clean restarts
 - No third-party packages
 
 ## Requirements
@@ -32,17 +36,24 @@ If `python` is not recognized, try `py neon_flip.py`.
 
 | Input | Action |
 | --- | --- |
-| Space or click | Start, then flip to the other lane |
-| A / D or Left / Right | Choose the left or right lane |
-| P or Escape | Pause or resume |
+| Left / Right or 1 / 2 (menu) | Select Classic or Rush |
+| Enter, Space, or click (menu) | Start the selected mode |
+| Space or click (during a run) | Flip to the other lane |
+| A / D or Left / Right (during a run) | Choose the left or right lane |
+| P or Escape (during a run) | Pause or resume |
 | Click while paused | Resume |
-| R | Start a fresh run |
-| Enter | Start from the menu |
+| R | Restart the current mode |
+| Escape (results screen) | Return to mode selection |
+| M | Toggle sound effects |
 
 ## How to Play
 
-Stay out of the lane occupied by each red hazard and collect gold gems for points. Collecting gems in a row builds a combo multiplier; the combo fades after a short break. Seven gems charge Overdrive for five seconds. During Overdrive, the player is protected and can smash hazards for bonus points.
+Stay out of the lane occupied by each red hazard and collect gold gems for points. Blue shield pickups appear occasionally in the safe lane. A shield protects against one hazard collision, then breaks; it does not use a life. Shields cannot stack. Overdrive destroys hazards without consuming an active shield.
 
-A quick lane change near a hazard can earn a close-call bonus. You have three lives. After taking damage, brief invulnerability prevents repeated hits while the damage effect is visible. The score rises as you survive, and obstacle speed increases over time.
+Collecting gems in a row builds a combo multiplier; the combo fades after a short break. Seven gems charge Overdrive for five seconds. During Overdrive, the player is protected and can smash hazards for bonus points. A quick lane change near a hazard can earn a close-call bonus.
 
-Your best score is stored in `neon_flip_highscore.json` beside the game file. It is created when a new record is reached and can be deleted to reset the record. The game continues to work if the file is absent, invalid, or the folder cannot be written.
+Classic starts with three lives. Rush starts with one life, has a faster but capped obstacle pace, and awards 1.5 times the score. Each wave has one hazard. Its same-wave gem or shield, when present, appears in the other, safe lane. Optional bonus gems can appear later. After damage, brief invulnerability prevents repeated hits.
+
+## High Scores and Sound
+
+Mode records are stored in `neon_flip_highscore.json` beside the game file. Existing Version 1.1 `high_score` data is kept as the Classic record when the new format is loaded. The file is updated when a new record is earned. Missing, malformed, or incomplete data is handled safely. Sound effects use asynchronous Windows system sounds when available; on unsupported systems, sound starts disabled and gameplay remains unchanged.
