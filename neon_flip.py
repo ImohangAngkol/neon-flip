@@ -1,7 +1,7 @@
 """NEON FLIP — a tiny one-file arcade game. Requires only Python's Tkinter.
 
 Run: python neon_flip.py
-Controls: SPACE or click = flip lane; A/D or arrows = choose lane; R = restart.
+Controls: SPACE or click = flip lane; A/D or arrows = choose lane; P/Escape = pause; R = restart.
 """
 
 import json
@@ -34,7 +34,7 @@ class NeonFlip:
                                 highlightthickness=0)
         self.canvas.pack()
         root.bind("<KeyPress>", self.on_key)
-        root.bind("<KeyRelease-space>", self.on_space_release)
+        root.bind("<KeyRelease>", self.on_key_release)
         self.canvas.bind("<Button-1>", self.on_click)
         self.space_held = False
         self.high_score = self.load_high_score()
@@ -43,6 +43,7 @@ class NeonFlip:
                       for _ in range(70)]
         self.particles = []
         self.state = "ready"
+        self.pause_held = False
         self.reset()
         self.last_tick = time.perf_counter()
         self.tick()
@@ -54,8 +55,10 @@ class NeonFlip:
     def load_high_score(self):
         try:
             data = json.loads(self.score_file().read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                return 0
             return max(0, int(data.get("high_score", 0)))
-        except (OSError, ValueError, TypeError):
+        except (OSError, ValueError, TypeError, OverflowError):
             return 0
 
     def save_high_score(self):
@@ -75,6 +78,7 @@ class NeonFlip:
         self.crystals = 0
         self.fever = 0.0
         self.invulnerable = 0.0
+        self.damage_flash = 0.0
         self.shake = 0.0
         self.target_lane = 0
         self.player_x = float(LANES[0])
@@ -83,28 +87,46 @@ class NeonFlip:
         self.spawn_clock = 0.4
         self.popups = []
         self.space_held = False
+        self.pause_held = False
+        self.new_high_score = False
 
     def start(self):
         self.reset()
         self.state = "playing"
+        self.last_tick = time.perf_counter()
 
-    def on_space_release(self, _event):
-        self.space_held = False
+    def on_key_release(self, event):
+        key = event.keysym.lower()
+        if key == "space":
+            self.space_held = False
+        elif key in ("p", "escape"):
+            self.pause_held = False
 
     def on_key(self, event):
         key = event.keysym.lower()
-        if key in ("return", "r") and self.state != "playing":
+        if key == "r":
+            self.start()
+            return
+        if key in ("p", "escape") and self.state in ("playing", "paused"):
+            if self.pause_held:
+                return
+            self.pause_held = True
+            self.state = "paused" if self.state == "playing" else "playing"
+            self.last_tick = time.perf_counter()
+            return
+        if key == "return" and self.state in ("ready", "over"):
             self.start()
             return
         if key == "space":
             if self.space_held:
                 return
             self.space_held = True
-            if self.state != "playing":
+            if self.state in ("ready", "over"):
                 self.start()
                 self.space_held = True  # Ignore key-repeat until SPACE is released.
-            else:
+            elif self.state == "playing":
                 self.switch_lane(1 - self.target_lane)
+            return
         elif self.state == "playing":
             if key in ("a", "left"):
                 self.switch_lane(0)
@@ -114,6 +136,9 @@ class NeonFlip:
     def on_click(self, _event):
         if self.state == "playing":
             self.switch_lane(1 - self.target_lane)
+        elif self.state == "paused":
+            self.state = "playing"
+            self.last_tick = time.perf_counter()
         else:
             self.start()
 
@@ -135,6 +160,7 @@ class NeonFlip:
         self.burst(self.player_x, PLAYER_Y + 18, CYAN, 8)
 
     def spawn_wave(self):
+        """Add one hazard and, usually, a gem in the other lane."""
         hazard_lane = random.randrange(2)
         self.objects.append({
             "kind": "hazard", "lane": hazard_lane, "y": -45.0,
@@ -178,6 +204,7 @@ class NeonFlip:
             self.hearts -= 1
             self.combo = 0
             self.invulnerable = 1.25
+            self.damage_flash = 0.22
             self.shake = 0.28
             self.popup("OUCH!", self.player_x, PLAYER_Y - 45, PINK)
             self.burst(self.player_x, PLAYER_Y, PINK, 23)
@@ -206,9 +233,20 @@ class NeonFlip:
         self.state = "over"
         if int(self.score) > self.high_score:
             self.high_score = int(self.score)
+            self.new_high_score = True
             self.save_high_score()
 
+    def overlaps_player(self, obj):
+        """Use forgiving hit areas close to the visible player and object shapes."""
+        dx = (self.player_x - LANES[obj["lane"]]) / (39 if obj["kind"] == "gem" else 49)
+        dy = (obj["y"] - PLAYER_Y) / (39 if obj["kind"] == "gem" else 51)
+        return dx * dx + dy * dy <= 1
+
     def update(self, dt):
+        """Advance the game by dt seconds; paused runs do not advance."""
+        if self.state == "paused":
+            return
+
         for star in self.stars:
             star[1] = (star[1] + star[2] * dt) % HEIGHT
         for p in self.particles:
@@ -232,27 +270,27 @@ class NeonFlip:
             self.combo = 0
         self.fever = max(0.0, self.fever - dt)
         self.invulnerable = max(0.0, self.invulnerable - dt)
+        self.damage_flash = max(0.0, self.damage_flash - dt)
         self.shake = max(0.0, self.shake - dt)
-        movement = min(1.0, dt * 15)
+        movement = 1 - math.exp(-18 * dt)
         self.player_x += (LANES[self.target_lane] - self.player_x) * movement
 
-        speed = min(490, 245 + self.elapsed * 6.1)
+        speed = min(455, 245 + self.elapsed * 5.8)
         self.spawn_clock -= dt
         if self.spawn_clock <= 0:
             self.spawn_wave()
-            self.spawn_clock += max(0.49, 0.92 - self.elapsed * 0.006)
+            self.spawn_clock += max(0.72, 0.92 - self.elapsed * 0.004)
 
         for obj in self.objects:
             obj["y"] += speed * dt
-            if obj["hit"] or abs(obj["y"] - PLAYER_Y) > 35:
+            if obj["hit"] or not self.overlaps_player(obj):
                 continue
-            if abs(self.player_x - LANES[obj["lane"]]) < 52:
-                if obj["kind"] == "gem":
-                    self.collect_gem(obj)
-                else:
-                    self.hit_hazard(obj)
-                if self.state == "over":
-                    break
+            if obj["kind"] == "gem":
+                self.collect_gem(obj)
+            else:
+                self.hit_hazard(obj)
+            if self.state == "over":
+                break
         self.objects = [o for o in self.objects if o["y"] < HEIGHT + 65
                         and not o["hit"]]
 
@@ -307,7 +345,7 @@ class NeonFlip:
                     self.text(x, y + 10, "!", 22, "#ffe1ed", True)
 
     def draw_player(self):
-        if self.state not in ("playing", "over"):
+        if self.state not in ("playing", "paused", "over"):
             return
         c = self.canvas
         x, y = self.player_x, PLAYER_Y
@@ -325,7 +363,7 @@ class NeonFlip:
                          fill="#207aa8", outline=color, width=3)
         c.create_polygon(x, y - 16, x + 8, y + 10, x, y + 5, x - 8, y + 10,
                          fill=color, outline="")
-        flame_height = random.randrange(16, 27)
+        flame_height = 18 + int((math.sin(self.elapsed * 18) + 1) * 4)
         c.create_polygon(x - 8, y + 23, x, y + 23 + flame_height, x + 8, y + 23,
                          fill=GOLD if self.fever > 0 else "#ff7d6c", outline="")
 
@@ -357,17 +395,18 @@ class NeonFlip:
         elif self.combo > 1:
             self.text(456, 706, f"COMBO x{min(self.combo, 5)}", 11, GOLD, True, "e")
 
-    def draw_overlay(self, title, subtitle, extra):
+    def draw_overlay(self, title, subtitle, extra, button_text="SPACE / CLICK TO PLAY",
+                     title_color=CYAN):
         c = self.canvas
         c.create_rectangle(41, 211, 439, 524, fill="#0d112d",
                            outline="#6b58d9", width=3)
         c.create_rectangle(53, 222, 427, 234, fill="#aa3dff", outline="")
-        self.text(WIDTH / 2, 285, title, 36, CYAN, True)
+        self.text(WIDTH / 2, 285, title, 36, title_color, True)
         self.text(WIDTH / 2, 336, subtitle, 14, "#f0f1ff", True)
         self.text(WIDTH / 2, 383, extra, 12, "#a5abd5")
         c.create_rectangle(108, 433, 372, 486, fill="#2d2563",
                            outline=GOLD, width=2)
-        self.text(WIDTH / 2, 459, "SPACE / CLICK TO PLAY", 15, GOLD, True)
+        self.text(WIDTH / 2, 459, button_text, 14, GOLD, True)
 
     def draw(self):
         self.canvas.delete("all")
@@ -375,18 +414,28 @@ class NeonFlip:
         self.draw_objects()
         self.draw_player()
         self.draw_particles_and_popups()
+        if self.damage_flash > 0:
+            self.canvas.create_rectangle(75, 97, 405, 689, outline=PINK, width=5)
         if self.shake > 0 and int(self.elapsed * 25) % 2:
             self.canvas.create_rectangle(82, 105, 398, 687,
                                          outline=PINK, width=5)
         self.draw_hud()
         if self.state == "ready":
             self.draw_overlay("NEON FLIP", "DODGE RED  ·  GRAB GOLD",
-                              "SPACE / CLICK: flip lanes   |   A / D: steer")
-            self.text(WIDTH / 2, 550, "7 gems = 5 seconds of OVERDRIVE!", 12, GOLD)
+                              "SPACE / CLICK: flip   A / D or ARROWS: steer",
+                              title_color=CYAN)
+            self.text(WIDTH / 2, 550, "P / ESC: pause   R: restart   |   7 gems = OVERDRIVE",
+                      11, GOLD)
+        elif self.state == "paused":
+            self.draw_overlay("PAUSED", "TAKE A BREATH",
+                              "R: restart the run",
+                              "P / ESC / CLICK TO RESUME", GOLD)
         elif self.state == "over":
             self.draw_overlay("GAME OVER", f"SCORE: {int(self.score)}  •  BEST: {self.high_score}",
-                              "Risky last-second flips earn bonus points")
-            self.text(WIDTH / 2, 550, "Press R to restart, too!", 12, "#b7c4ff")
+                              "NEW HIGH SCORE!" if self.new_high_score else
+                              "Risky last-second flips earn bonus points",
+                              title_color=GOLD if self.new_high_score else CYAN)
+            self.text(WIDTH / 2, 550, "SPACE / CLICK / R: play again", 12, "#b7c4ff")
         elif self.fever > 0:
             self.text(WIDTH / 2, 121, "★  OVERDRIVE  ★", 18, GOLD, True)
 
@@ -396,7 +445,7 @@ class NeonFlip:
         self.last_tick = now
         self.update(dt)
         self.draw()
-        self.root.after(16, self.tick)
+        self.root.after(100 if self.state == "paused" else 16, self.tick)
 
 
 if __name__ == "__main__":
